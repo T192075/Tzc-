@@ -5,10 +5,9 @@
 ## 文件结构
 
 ```
-
 main.py           # 完整程序（所有代码整合）
 exe.py            # 窗口版
-签到.exe          # windows执行文件，双击可运行
+晚点签到.exe          # windows执行文件，双击可运行
 README.md
 index.html    # 技术分析文档
 ```
