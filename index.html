@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TZC晚点签到系统 - 技术分析</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; line-height: 1.6; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+        header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px 0; text-align: center; }
+        header h1 { font-size: 2em; margin-bottom: 10px; }
+        .card { background: white; border-radius: 10px; padding: 25px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .card h2 { color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 10px; margin-bottom: 15px; }
+        .card h3 { color: #333; margin: 15px 0 10px; }
+        .code-block { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: 'Consolas', monospace; font-size: 14px; margin: 10px 0; }
+        .code-block .comment { color: #6a9955; }
+        .code-block .keyword { color: #569cd6; }
+        .code-block .string { color: #ce9178; }
+        .code-block .func { color: #dcdcaa; }
+        .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 15px 0; }
+        .flow-step { background: #667eea; color: white; padding: 10px 15px; border-radius: 5px; font-size: 14px; }
+        .flow-arrow { font-size: 20px; color: #667eea; }
+        .highlight { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        th { background: #667eea; color: white; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; }
+        .badge-get { background: #61affe; color: white; }
+        .badge-post { background: #49cc90; color: white; }
+        footer { text-align: center; padding: 30px; color: #666; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>TZC晚点签到系统技术分析</h1>
+            <p>基于签到接口的完整逆向分析</p>
+        </div>
+    </header>
+    
+    <div class="container">
+        <!-- 系统架构 -->
+        <div class="card">
+            <h2>系统架构</h2>
+            <div class="flow">
+                <div class="flow-step">客户端</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">SSO认证<br>sso.tzc.edu.cn</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">学工系统<br>xgfw.tzc.edu.cn</div>
+            </div>
+        </div>
+        
+        <!-- 登录流程 -->
+        <div class="card">
+            <h2>登录流程分析</h2>
+            <div class="flow">
+                <div class="flow-step">GET登录页面</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">解析密钥</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">AES加密密码</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">POST登录</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">获取Ticket</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">换取Cookie</div>
+            </div>
+            
+            <h3>关键代码</h3>
+            <div class="code-block">
+<span class="comment"># 1. 获取登录页面，解析加密密钥</span>
+login_url = BASE_SSO + "/login?service=" + requests.utils.quote(SVC, safe="")
+r = session.get(login_url, timeout=15)
+fields = parse_fields(r.text)
+ck = base64.b64decode(fields["login-croypto"])
+
+<span class="comment"># 2. 加密密码</span>
+<span class="keyword">def</span> <span class="func">enc</span>(text, key):
+    c = AES.new(key, AES.MODE_ECB)
+    <span class="keyword">return</span> base64.b64encode(c.encrypt(pad(text.encode(), 16))).decode()
+
+<span class="comment"># 3. 提交登录获取Ticket</span>
+data = [
+    (<span class="string">"username"</span>, USERNAME),
+    (<span class="string">"password"</span>, enc(PASSWORD, ck)),  <span class="comment"># 加密后的密码</span>
+    <span class="comment"># ... 其他字段</span>
+]
+r = session.post(BASE_SSO + "/login", data=data, allow_redirects=False)
+ticket = re.search(<span class="string">r"ticket=([^&\s]+)"</span>, r.headers["Location"]).group(1)
+            </div>
+        </div>
+        
+        <!-- 加密算法 -->
+        <div class="card">
+            <h2>加密算法分析</h2>
+            <div class="highlight">
+                <strong>AES-ECB模式</strong><br>
+                密钥：从登录页面login-croypto字段获取（Base64解码）<br>
+                填充：PKCS7（16字节对齐）<br>
+                输出：Base64编码
+            </div>
+            <div class="flow">
+                <div class="flow-step">明文密码</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">UTF-8编码</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">PKCS7填充</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">AES-ECB加密</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">Base64编码</div>
+            </div>
+        </div>
+        
+        <!-- API接口 -->
+        <div class="card">
+            <h2>API接口分析</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>方法</th>
+                        <th>接口</th>
+                        <th>功能</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="badge badge-get">GET</span></td>
+                        <td>/login</td>
+                        <td>获取登录页面</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge badge-post">POST</span></td>
+                        <td>/login</td>
+                        <td>提交登录</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge badge-post">POST</span></td>
+                        <td>/setAppRole.do</td>
+                        <td>设置应用角色</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge badge-post">POST</span></td>
+                        <td>/getKqInfo.do</td>
+                        <td>获取签到信息</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge badge-post">POST</span></td>
+                        <td>/addKqInfo.do</td>
+                        <td>提交签到</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Cookie机制 -->
+        <div class="card">
+            <h2>Cookie机制</h2>
+            <div class="code-block">
+<span class="comment"># 从响应中提取关键Cookie</span>
+weu_list, jsessionid = [], None
+<span class="keyword">for</span> resp_obj <span class="keyword">in</span> r.history + [r]:
+    <span class="keyword">for</span> c <span class="keyword">in</span> resp_obj.headers.get(<span class="string">"Set-Cookie"</span>, <span class="string">""</span>).split(<span class="string">","</span>):
+        m = re.search(<span class="string">r"_WEU=([^;]+)"</span>, c)
+        <span class="keyword">if</span> m: weu_list.append(m.group(1))
+        m = re.search(<span class="string">r"JSESSIONID=([^;]+)"</span>, c)
+        <span class="keyword">if</span> m: jsessionid = m.group(1)
+
+<span class="comment"># 后续请求使用Cookie</span>
+<span class="string">"Cookie"</span>: <span class="string">f"_WEU={session._WEU};EMAP_LANG=zh; JSESSIONID={session._JSESSIONID}"</span>
+            </div>
+        </div>
+        
+        <!-- 签到流程 -->
+        <div class="card">
+            <h2>签到流程</h2>
+            <div class="flow">
+                <div class="flow-step">登录成功</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">setAppRole.do<br>设置角色</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">getKqInfo.do<br>获取信息</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">检查班级</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">addKqInfo.do<br>提交签到</div>
+            </div>
+            
+            <h3>签到数据</h3>
+            <div class="code-block">
+<span class="comment"># 签到数据（URL编码的JSON）</span>
+{
+    <span class="string">"KQWZXX"</span>: <span class="string">"浙江省台州市椒江区市府大道1139号"</span>,  <span class="comment"># 位置</span>
+    <span class="string">"JDZB"</span>: 121.39567931605,                  <span class="comment"># 经度</span>
+    <span class="string">"WDZB"</span>: 28.655850491041                   <span class="comment"># 纬度</span>
+}
+            </div>
+        </div>
+        
+        <!-- 请求示例 -->
+        <div class="card">
+            <h2>完整请求示例</h2>
+            <div class="code-block">
+<span class="comment"># 登录请求</span>
+POST https://sso.tzc.edu.cn/login
+Content-Type: application/x-www-form-urlencoded
+
+username=学号&password=AES加密后&croypto=密钥&execution=流程标识
+
+<span class="comment"># 签到请求</span>
+POST https://xgfw.tzc.edu.cn/xsfw/sys/swmzncqapp/kqController/addKqInfo.do
+Cookie: _WEU=xxx; JSESSIONID=xxx
+Content-Type: application/x-www-form-urlencoded
+
+data=%7B%22KQWZXX%22%3A%22浙江省台州市...%22%2C%22JDZB%22%3A121.395%2C%22WDZB%22%3A28.655%7D
+            </div>
+        </div>
+    </div>
+    
+    <footer>
+        <p>TZC晚点签到系统技术分析文档 | 仅供学习交流</p>
+    </footer>
+</body>
+</html>
